@@ -3,6 +3,7 @@ package dockertest
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"os/exec"
@@ -88,7 +89,11 @@ func dockerHost() string {
 	if err != nil {
 		return "127.0.0.1"
 	}
-	return dockerHost.Host
+	h, _, err := net.SplitHostPort(dockerHost.Host)
+	if err != nil {
+		return dockerHost.Host
+	}
+	return h
 }
 
 func getMapping(ID string, port map[string]string) (map[string]Mapped, error) {
