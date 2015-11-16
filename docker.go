@@ -3,6 +3,8 @@ package dockertest
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -13,10 +15,28 @@ var ErrTimeout = fmt.Errorf("dockertest: timeout")
 
 const defaultTimeout = 3 * time.Minute
 
+type Mapped struct {
+	Host       string
+	DockerHost string
+	Port       string
+}
+
+func (m Mapped) HostAndPort() string {
+	return m.Host + ":" + m.Port
+}
+
+func (m Mapped) DockerHostAndPort() string {
+	return m.DockerHost + ":" + m.Port
+}
+
+func (m Mapped) String() string {
+	return m.DockerHostAndPort()
+}
+
 // Container represents Docker container.
 type Container struct {
 	ID          string
-	Mapped      map[string]string
+	Mapped      map[string]Mapped
 	WaitTimeout time.Duration // it is set to 3 minutes as the default by New.
 }
 
@@ -26,11 +46,22 @@ type Config struct {
 	PortMapping map[string]string // PortMapping["port/proto"] = "host:port"
 }
 
+func SuggestMappingHost() string {
+	if dockerHost() == "127.0.0.1" {
+		return "127.0.0.1"
+	}
+	return "0.0.0.0"
+}
+
 // New runs new Docker container.
 func New(conf Config) (*Container, error) {
 	args := []string{"run", "-d"}
 	for p, h := range conf.PortMapping {
-		args = append(args, "-p", h+":"+p)
+		if h == "auto" {
+			args = append(args, "-p", SuggestMappingHost()+":0:"+p)
+		} else {
+			args = append(args, "-p", h+":"+p)
+		}
 	}
 	for key, val := range conf.Env {
 		args = append(args, "-e", key+"="+val)
@@ -52,7 +83,15 @@ func New(conf Config) (*Container, error) {
 	return c, nil
 }
 
-func getMapping(ID string, port map[string]string) (map[string]string, error) {
+func dockerHost() string {
+	dockerHost, err := url.Parse(os.Getenv("DOCKER_HOST"))
+	if err != nil {
+		return "127.0.0.1"
+	}
+	return dockerHost.Host
+}
+
+func getMapping(ID string, port map[string]string) (map[string]Mapped, error) {
 	o, err := exec.Command("docker", "inspect", ID).CombinedOutput()
 	if err != nil {
 		return nil, fmt.Errorf("dockertest: docker inspect failed: %v: %s", err, o)
@@ -69,16 +108,31 @@ func getMapping(ID string, port map[string]string) (map[string]string, error) {
 	if err = json.Unmarshal(o, &r); err != nil {
 		return nil, fmt.Errorf("dockertest: could not parse docker inspect output: %v: %s", err, o)
 	}
-	if len(r) != 1 {
+	switch len(r) {
+	case 0:
+		return nil, fmt.Errorf("dockertest: could not find network setting")
+	case 1:
+		break
+	default:
 		return nil, fmt.Errorf("dockertest: more than one result: %d", len(r))
 	}
-	m := map[string]string{}
+
+	m := map[string]Mapped{}
 	for p := range port {
 		ps := r[0].NetworkSettings.Ports[p]
-		if len(ps) != 1 {
+		switch len(ps) {
+		case 0:
+			return nil, fmt.Errorf("dockertest: could not find port mapping data")
+		case 1:
+			break
+		default:
 			return nil, fmt.Errorf("dockertest: more than one port mapping data: %d", len(ps))
 		}
-		m[p] = ps[0].HostIp + ":" + ps[0].HostPort
+		m[p] = Mapped{
+			Host:       ps[0].HostIp,
+			DockerHost: dockerHost(),
+			Port:       ps[0].HostPort,
+		}
 	}
 	return m, nil
 }
