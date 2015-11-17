@@ -45,6 +45,7 @@ type Container struct {
 type Config struct {
 	Image       string            // "image[:version]" such as "postgres:latest".
 	Args        []string          // Additional parameters for the container.
+	DockerArgs  []string          // Additional parameters for the docker.
 	Env         map[string]string // Env["ENV_NAME"] = "VALUE"
 	PortMapping map[string]string // PortMapping["port/proto"] = "host:port"
 }
@@ -88,6 +89,9 @@ func New(conf Config) (*Container, error) {
 	}
 	for key, val := range conf.Env {
 		args = append(args, "-e", key+"="+val)
+	}
+	if conf.DockerArgs != nil {
+		args = append(args, conf.DockerArgs...)
 	}
 	args = append(args, conf.Image)
 	if conf.Args != nil {
