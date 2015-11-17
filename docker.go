@@ -47,11 +47,31 @@ type Config struct {
 	PortMapping map[string]string // PortMapping["port/proto"] = "host:port"
 }
 
-func SuggestMappingHost() string {
-	if dockerHost() == "127.0.0.1" {
+func dockerHost() string {
+	return evalDockerHost(os.Getenv("DOCKER_HOST"))
+}
+
+func evalDockerHost(envvar string) string {
+	dhURL, err := url.Parse(envvar)
+	if envvar == "" || err != nil {
+		return "127.0.0.1"
+	}
+	h, _, err := net.SplitHostPort(dhURL.Host)
+	if err != nil {
+		return dhURL.Host
+	}
+	return h
+}
+
+func suggestMappingHost(envvar string) string {
+	if evalDockerHost(envvar) == "127.0.0.1" {
 		return "127.0.0.1"
 	}
 	return "0.0.0.0"
+}
+
+func SuggestMappingHost() string {
+	return suggestMappingHost(os.Getenv("DOCKER_HOST"))
 }
 
 // New runs new Docker container.
@@ -82,19 +102,6 @@ func New(conf Config) (*Container, error) {
 		return nil, err
 	}
 	return c, nil
-}
-
-func dockerHost() string {
-	dh := os.Getenv("DOCKER_HOST")
-	dockerHost, err := url.Parse(dh)
-	if dh == "" || err != nil {
-		return "127.0.0.1"
-	}
-	h, _, err := net.SplitHostPort(dockerHost.Host)
-	if err != nil {
-		return dockerHost.Host
-	}
-	return h
 }
 
 func getMapping(ID string, port map[string]string) (map[string]Mapped, error) {
