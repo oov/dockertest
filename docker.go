@@ -39,10 +39,12 @@ type Container struct {
 	ID          string
 	Mapped      map[string]Mapped
 	WaitTimeout time.Duration // it is set to 3 minutes as the default by New.
+	runArgs     []string
 }
 
 type Config struct {
 	Image       string            // "image[:version]" such as "postgres:latest".
+	Args        []string          // Additional parameters for the container.
 	Env         map[string]string // Env["ENV_NAME"] = "VALUE"
 	PortMapping map[string]string // PortMapping["port/proto"] = "host:port"
 }
@@ -88,6 +90,9 @@ func New(conf Config) (*Container, error) {
 		args = append(args, "-e", key+"="+val)
 	}
 	args = append(args, conf.Image)
+	if conf.Args != nil {
+		args = append(args, conf.Args...)
+	}
 
 	o, err := exec.Command("docker", args...).CombinedOutput()
 	if err != nil {
@@ -96,12 +101,18 @@ func New(conf Config) (*Container, error) {
 	c := &Container{
 		ID:          strings.TrimSpace(string(o)),
 		WaitTimeout: defaultTimeout,
+		runArgs:     args,
 	}
 	if c.Mapped, err = getMapping(c.ID, conf.PortMapping); err != nil {
 		c.Close()
 		return nil, err
 	}
 	return c, nil
+}
+
+// RunArgs returns parameters that was used for "docker run".
+func (c *Container) RunArgs() []string {
+	return c.runArgs
 }
 
 func getMapping(ID string, port map[string]string) (map[string]Mapped, error) {
