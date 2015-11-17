@@ -85,8 +85,9 @@ func New(conf Config) (*Container, error) {
 }
 
 func dockerHost() string {
-	dockerHost, err := url.Parse(os.Getenv("DOCKER_HOST"))
-	if err != nil {
+	dh := os.Getenv("DOCKER_HOST")
+	dockerHost, err := url.Parse(dh)
+	if dh == "" || err != nil {
 		return "127.0.0.1"
 	}
 	h, _, err := net.SplitHostPort(dockerHost.Host)
