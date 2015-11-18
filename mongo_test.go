@@ -9,7 +9,7 @@ import (
 
 func Example_mongoDB() {
 	c, err := dockertest.New(dockertest.Config{
-		Image: "mongo", // or "redis:latest"
+		Image: "mongo", // or "mongo:latest"
 		PortMapping: map[string]string{
 			"27017/tcp": "auto",
 		},
