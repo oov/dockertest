@@ -329,6 +329,11 @@ func (c *Container) Wait(port []string) error {
 	return nil
 }
 
+// Reused reports whenever the container was existed one.
+func (c *Container) Reused() bool {
+	return !c.created
+}
+
 // Close kills and removes the container.
 // However if you are reusing existing container, it is not removed.
 func (c *Container) Close() error {
