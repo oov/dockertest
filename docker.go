@@ -64,7 +64,7 @@ type Config struct {
 	PortMapping map[string]string
 
 	// If this is set to true, Close stops the container instead of removes.
-	// But this behavior apply to the created (= not reused) and named container only.
+	// But this behavior is applied to the created (= not reused) and named container only.
 	StopOnClose bool
 }
 
