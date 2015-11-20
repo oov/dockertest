@@ -34,22 +34,38 @@ func (m Mapped) String() string {
 	return m.DockerHostAndPort()
 }
 
+type action int
+
+const (
+	actionCreated = action(iota)
+	actionStarted
+	actionNothing
+)
+
 // Container represents Docker container.
 type Container struct {
 	ID          string
 	Mapped      map[string]Mapped
 	WaitTimeout time.Duration // it is set to 3 minutes as the default by New.
 	runArgs     []string
-	created     bool
+	action      action
+	stopOnClose bool
 }
 
 type Config struct {
-	Image       string            // "image[:version]" such as "postgres:latest".
-	Name        string            // used for to reuse existing container.
-	Args        []string          // Additional parameters for the container.
-	DockerArgs  []string          // Additional parameters for the docker.
-	Env         map[string]string // Env["ENV_NAME"] = "VALUE"
-	PortMapping map[string]string // PortMapping["port/proto"] = "host:port"
+	Image      string            // "image[:version]" such as "postgres:latest".
+	Name       string            // used for to reuse existing container.
+	Args       []string          // Additional parameters for the container.
+	DockerArgs []string          // Additional parameters for the docker.
+	Env        map[string]string // Env["ENV_NAME"] = "VALUE"
+
+	// PortMapping["port/proto"] = "host:port"
+	// You can use also "auto" in value.
+	PortMapping map[string]string
+
+	// If this is set to true, Close stops the container instead of removes.
+	// But this behavior apply to the created (= not reused) and named container only.
+	StopOnClose bool
 }
 
 func dockerHost() string {
@@ -89,7 +105,10 @@ func reuse(conf *Config) (*Container, error) {
 	}
 
 	var r []struct {
-		Id string
+		Id    string
+		State struct {
+			Running bool
+		}
 	}
 	if err = json.Unmarshal(o, &r); err != nil {
 		return nil, fmt.Errorf("dockertest: could not parse docker inspect output: %v: %s", err, o)
@@ -106,8 +125,24 @@ func reuse(conf *Config) (*Container, error) {
 	c := &Container{
 		ID:          r[0].Id,
 		WaitTimeout: defaultTimeout,
+		action:      actionNothing,
 	}
-	if c.Mapped, err = parsePortMapping(o, conf.PortMapping); err != nil {
+
+	if r[0].State.Running {
+		if c.Mapped, err = parsePortMapping(o, conf.PortMapping); err != nil {
+			return nil, err
+		}
+		return c, nil
+	}
+
+	o, err = exec.Command("docker", "start", c.ID).CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("dockertest: docker start failed: %v: %s", err, o)
+	}
+
+	c.action = actionStarted
+	if c.Mapped, err = getMapping(c.ID, conf.PortMapping); err != nil {
+		c.Close()
 		return nil, err
 	}
 	return c, nil
@@ -139,6 +174,9 @@ func New(conf Config) (*Container, error) {
 	if conf.DockerArgs != nil {
 		args = append(args, conf.DockerArgs...)
 	}
+	if conf.Name != "" && conf.StopOnClose {
+		args = append(args, "--name", conf.Name)
+	}
 	args = append(args, conf.Image)
 	if conf.Args != nil {
 		args = append(args, conf.Args...)
@@ -152,7 +190,8 @@ func New(conf Config) (*Container, error) {
 		ID:          strings.TrimSpace(string(o)),
 		WaitTimeout: defaultTimeout,
 		runArgs:     args,
-		created:     true,
+		action:      actionCreated,
+		stopOnClose: conf.Name != "" && conf.StopOnClose,
 	}
 	if c.Mapped, err = getMapping(c.ID, conf.PortMapping); err != nil {
 		c.Close()
@@ -331,19 +370,33 @@ func (c *Container) Wait(port []string) error {
 
 // Reused reports whenever the container was existed one.
 func (c *Container) Reused() bool {
-	return !c.created
+	return c.action != actionCreated
 }
 
 // Close kills and removes the container.
 // However if you are reusing existing container, it is not removed.
 func (c *Container) Close() error {
-	if !c.created {
+	switch c.action {
+	case actionCreated:
+		var args []string
+		if c.stopOnClose {
+			args = []string{"stop", c.ID}
+		} else {
+			args = []string{"rm", "-f", c.ID}
+		}
+		o, err := exec.Command("docker", args...).CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("dockertest: docker %s failed: %v: %s", args[0], err, o)
+		}
+		return nil
+	case actionStarted:
+		o, err := exec.Command("docker", "stop", c.ID).CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("dockertest: docker stop failed: %v: %s", err, o)
+		}
+		return nil
+	case actionNothing:
 		return nil
 	}
-
-	o, err := exec.Command("docker", "rm", "-f", c.ID).CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("dockertest: docker rm failed: %v: %s", err, o)
-	}
-	return nil
+	panic("logic error")
 }
