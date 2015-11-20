@@ -16,6 +16,7 @@ func Example_mySQL() {
 	)
 	c, err := dockertest.New(dockertest.Config{
 		Image: "mysql", // or "mysql:latest"
+		Name:  "dockertest-mysql",
 		PortMapping: map[string]string{
 			"3306/tcp": "auto",
 		},

@@ -10,6 +10,7 @@ import (
 func Example_redis() {
 	c, err := dockertest.New(dockertest.Config{
 		Image: "redis", // or "redis:latest"
+		Name:  "dockertest-redis",
 		PortMapping: map[string]string{
 			"6379/tcp": "auto",
 		},

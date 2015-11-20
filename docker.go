@@ -40,10 +40,12 @@ type Container struct {
 	Mapped      map[string]Mapped
 	WaitTimeout time.Duration // it is set to 3 minutes as the default by New.
 	runArgs     []string
+	created     bool
 }
 
 type Config struct {
 	Image       string            // "image[:version]" such as "postgres:latest".
+	Name        string            // used for to reuse existing container.
 	Args        []string          // Additional parameters for the container.
 	DockerArgs  []string          // Additional parameters for the docker.
 	Env         map[string]string // Env["ENV_NAME"] = "VALUE"
@@ -77,8 +79,52 @@ func SuggestMappingHost() string {
 	return suggestMappingHost(os.Getenv("DOCKER_HOST"))
 }
 
+func reuse(conf *Config) (*Container, error) {
+	o, err := exec.Command("docker", "inspect", conf.Name).CombinedOutput()
+	if err != nil {
+		if strings.Contains(string(o), "No such image or container") {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("dockertest: docker inspect failed: %v: %s", err, o)
+	}
+
+	var r []struct {
+		Id string
+	}
+	if err = json.Unmarshal(o, &r); err != nil {
+		return nil, fmt.Errorf("dockertest: could not parse docker inspect output: %v: %s", err, o)
+	}
+	switch len(r) {
+	case 0:
+		return nil, fmt.Errorf("dockertest: could not find network setting")
+	case 1:
+		break
+	default:
+		return nil, fmt.Errorf("dockertest: more than one result: %d", len(r))
+	}
+
+	c := &Container{
+		ID:          r[0].Id,
+		WaitTimeout: defaultTimeout,
+	}
+	if c.Mapped, err = parsePortMapping(o, conf.PortMapping); err != nil {
+		return nil, err
+	}
+	return c, nil
+}
+
 // New runs new Docker container.
 func New(conf Config) (*Container, error) {
+	if conf.Name != "" {
+		c, err := reuse(&conf)
+		if err != nil {
+			return nil, err
+		}
+		if c != nil {
+			return c, nil
+		}
+	}
+
 	args := []string{"run", "-d"}
 	for p, h := range conf.PortMapping {
 		if h == "auto" {
@@ -106,6 +152,7 @@ func New(conf Config) (*Container, error) {
 		ID:          strings.TrimSpace(string(o)),
 		WaitTimeout: defaultTimeout,
 		runArgs:     args,
+		created:     true,
 	}
 	if c.Mapped, err = getMapping(c.ID, conf.PortMapping); err != nil {
 		c.Close()
@@ -125,6 +172,10 @@ func getMapping(ID string, port map[string]string) (map[string]Mapped, error) {
 		return nil, fmt.Errorf("dockertest: docker inspect failed: %v: %s", err, o)
 	}
 
+	return parsePortMapping(o, port)
+}
+
+func parsePortMapping(b []byte, port map[string]string) (map[string]Mapped, error) {
 	var r []struct {
 		NetworkSettings struct {
 			Ports map[string][]struct {
@@ -133,8 +184,8 @@ func getMapping(ID string, port map[string]string) (map[string]Mapped, error) {
 			}
 		}
 	}
-	if err = json.Unmarshal(o, &r); err != nil {
-		return nil, fmt.Errorf("dockertest: could not parse docker inspect output: %v: %s", err, o)
+	if err := json.Unmarshal(b, &r); err != nil {
+		return nil, fmt.Errorf("dockertest: could not parse docker inspect output: %v: %s", err, b)
 	}
 	switch len(r) {
 	case 0:
@@ -279,7 +330,12 @@ func (c *Container) Wait(port []string) error {
 }
 
 // Close kills and removes the container.
+// However if you are reusing existing container, it is not removed.
 func (c *Container) Close() error {
+	if !c.created {
+		return nil
+	}
+
 	o, err := exec.Command("docker", "rm", "-f", c.ID).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("dockertest: docker rm failed: %v: %s", err, o)

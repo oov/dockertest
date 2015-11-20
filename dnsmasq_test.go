@@ -10,6 +10,7 @@ import (
 func Example_dnsmasq() {
 	c, err := dockertest.New(dockertest.Config{
 		Image: "andyshinn/dnsmasq", // or "andyshinn/dnsmasq:latest"
+		Name:  "dockertest-dnsmasq",
 		Args: []string{
 			"--user=root",
 			"--address=/the-answer-to-life-the-universe-and-everything/42.42.42.42",

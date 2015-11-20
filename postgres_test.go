@@ -17,6 +17,7 @@ func Example_postgreSQL() {
 	)
 	c, err := dockertest.New(dockertest.Config{
 		Image: "postgres", // or "postgres:latest"
+		Name:  "dockertest-postgres",
 		PortMapping: map[string]string{
 			"5432/tcp": "auto",
 		},

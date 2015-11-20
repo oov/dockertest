@@ -10,6 +10,7 @@ import (
 func Example_mongoDB() {
 	c, err := dockertest.New(dockertest.Config{
 		Image: "mongo", // or "mongo:latest"
+		Name:  "dockertest-mongo",
 		PortMapping: map[string]string{
 			"27017/tcp": "auto",
 		},
